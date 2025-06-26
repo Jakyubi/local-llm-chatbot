@@ -17,13 +17,32 @@ class Colors:
     SYSTEM = '\033[90m'     #gray
     RESET = '\033[0m'       #reset
 
+#formats and prints history
 def print_history(history: str):
     border = "=" * 40
     print(f"\n{Colors.SYSTEM}{border}")
     print(" CURRENT CHAT HISTORY")
-    print(border)
-    print_with_margins(history)
-    print(border + "\n" + Colors.RESET)
+    print(border + Colors.RESET)
+
+    margin = ' ' * 4  # lewy margines
+
+    lines = history.strip().split("\n")
+    for line in lines:
+        if line.startswith("User:"):
+            content = line[len("User:"):].strip()
+            print(f"{Colors.SYSTEM}{margin}User:{Colors.RESET}")
+            print_with_margins(content, left_margin=8, color=Colors.SYSTEM)
+            print()
+        elif line.startswith("Assistant:"):
+            content = line[len("Assistant:"):].strip()
+            print(f"{Colors.SYSTEM}{margin}Assistant:{Colors.RESET}")
+            print_with_margins(content, left_margin=8, color=Colors.SYSTEM)
+            print()
+        else:
+            # system prompt lub inne linie
+            print(f"{Colors.SYSTEM}{margin}{line}{Colors.RESET}")
+
+    print(f"{Colors.SYSTEM}{border}\n{Colors.RESET}")
 
 #estimated token count
 def count_tokens(text: str) -> int:
@@ -39,7 +58,8 @@ def trim_history_to_limit(history: str, max_context: int) -> str:
         other_lines.pop(0)
     return system_prompt + "\n" + "\n".join(other_lines) + "\n"
 
-def print_with_margins(text, left_margin=4, right_margin=4):
+#format text with margins and wrapping
+def print_with_margins(text, left_margin=4, right_margin=4, color=Colors.RESET):
     columns = shutil.get_terminal_size().columns
     usable_width = max(20, columns-left_margin - right_margin)
     margin = ' ' * left_margin
@@ -51,11 +71,16 @@ def print_with_margins(text, left_margin=4, right_margin=4):
             print()
         else:
             for wline in wrapped:
-                print(margin + wline)
+                print(f"{color}{margin}{wline}{Colors.RESET}")
         sys.stdout.flush()
 
+#cleans response of ai-generated user: lines (only for history)
+def clean_response(response: str) -> str:
+    parts = response.split("\nUser:",1)
+    response = parts[0].strip()
+    return response
 
-#runs 'ollama run <model> <prompt>
+#unused run function, generates whole ai answer at once
 '''
 def run_ollama(model_name: str, prompt: str) -> str:
     try:
@@ -78,6 +103,7 @@ def run_ollama(model_name: str, prompt: str) -> str:
 
 
 #runs 'ollama run <model> <prompt>, streaming one chunk of text at time, doesn't wait for whole answer to generate
+#without threads process may get stuck while printing ai answer
 def run_ollama_streaming(model_name: str, prompt: str) -> str:
     try:
         process = subprocess.Popen(
@@ -105,6 +131,9 @@ def run_ollama_streaming(model_name: str, prompt: str) -> str:
                     for line in parts[:-1]:
                         if not started_printing and line.strip() == "":
                             continue
+                        #stops when ai tries to generate user: prompt
+                        if line.strip().startswith("User:"): 
+                            return
                         started_printing = True
                         print_with_margins(line)
                         output_lines.append(line.strip())
@@ -124,7 +153,7 @@ def run_ollama_streaming(model_name: str, prompt: str) -> str:
 
         process.wait()
         t_out.join()
-        t_out.join()
+        t_err.join()
 
         while output_lines and output_lines[0] == "":
             output_lines.pop(0)
@@ -143,27 +172,56 @@ def run_ollama_streaming(model_name: str, prompt: str) -> str:
 def main():
     model = "openhermes25"  #select llm model to run
     max_context = 8000      #max context of your model
-    history = "You are a helpful AI assistant. Provide clear, polite, and formal answers. Do not invent User inputs. Only respond as Assistant.\n" #start of history, can act as system prompt
-    print(f"{Colors.SYSTEM}Welcome! Type 'exit' to quit, commands: /history.\n{Colors.RESET}")
+    print(f"{Colors.SYSTEM}Welcome! Type 'exit' to quit, commands: /reset, /history, /style [name] - change style (normal,)\n{Colors.RESET}")
 
+    #starting style
+    current_style = "normal"
+
+    #here you can add or modify styles
+    style_prompts = {
+        "normal" : "You are a helpful AI assistant. Provide clear, polite, and formal answers. Do not invent User inputs. Only respond as Assistant."
+    }
+
+    history = style_prompts[current_style] + "\n" #start of history, can act as system prompt
+
+    #main loop
     while True:
-        user_input = input(f"{Colors.USER}User: {Colors.RESET}").strip() #user input
+        user_input = input(f"{Colors.USER}User: {Colors.RESET}").strip()
         if user_input.lower() in ("exit"): #close with 'exit'
             print(f"{Colors.SYSTEM}Exiting...{Colors.RESET}")
             break
+
         if user_input == "/history":
             print_history(history)
             continue
 
+        if user_input.startswith("/style"):
+            parts = user_input.split()
+            if len(parts) == 2 and parts[1] in style_prompts:
+                current_style = parts[1]
+                history = style_prompts[current_style] + "\n"
+                print(f"{Colors.SYSTEM}Style changed to '{current_style}'. History reset.{Colors.RESET}\n")
+            else:
+                print(f"{Colors.ERROR}Unknown style. Available: {', '.join(style_prompts.keys())}{Colors.RESET}\n")
+            continue
+
+        if user_input == "/reset":
+            history = style_prompts[current_style] + "\n"
+            print(f"{Colors.SYSTEM}History reset.{Colors.RESET}\n")
+            continue
+        
+        
         history += f"User: {user_input}\nAssistant: " #add user input to history
         
         print(f"{Colors.SYSTEM}Processing...{Colors.RESET}")
         print(f"{Colors.ASSISTANT}Assistant:{Colors.RESET}\n")  #print model's response
         
         start_time = time.perf_counter()
-        response = run_ollama_streaming(model, history) #run model with history as prompt
+        raw_response = run_ollama_streaming(model, history) #run model with history as prompt
         end_time = time.perf_counter()
+        response = clean_response(raw_response)
         
+        #calculate estimated tokens per second
         token_count = count_tokens(response)
         elapsed = end_time - start_time
         tps = token_count / elapsed if elapsed > 0 else float('inf')
