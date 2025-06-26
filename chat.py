@@ -22,7 +22,7 @@ def print_history(history: str):
     print(f"\n{Colors.SYSTEM}{border}")
     print(" CURRENT CHAT HISTORY")
     print(border)
-    print(history)
+    print_with_margins(history)
     print(border + "\n" + Colors.RESET)
 
 #estimated token count
@@ -53,6 +53,8 @@ def print_with_margins(text, left_margin=4, right_margin=4):
             for wline in wrapped:
                 print(margin + wline)
         sys.stdout.flush()
+
+
 #runs 'ollama run <model> <prompt>
 '''
 def run_ollama(model_name: str, prompt: str) -> str:
@@ -165,7 +167,7 @@ def main():
         token_count = count_tokens(response)
         elapsed = end_time - start_time
         tps = token_count / elapsed if elapsed > 0 else float('inf')
-        print(f"{Colors.SYSTEM}Performance: {token_count} tokens generated in {elapsed:.2f} tokens/s{Colors.RESET}\n")
+        print(f"{Colors.SYSTEM}Performance: {token_count} tokens generated in {elapsed:.2f} s -> {tps:.2f} tokens/s{Colors.RESET}\n")
 
         history += response + "\n" #add response to history
         history = trim_history_to_limit(history, max_context)
